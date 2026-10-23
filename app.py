@@ -4,7 +4,6 @@ import math
 import os
 import pandas as pd
 import requests
-from mlbstatsapi import Mlb
 import streamlit as st
 
 load_dotenv()
@@ -261,38 +260,7 @@ weekend_only = st.sidebar.checkbox(
     help="Restrict concerts to Friday, Saturday, or Sunday.",
 )
 
-mlb_teams_list = [
-    "Arizona Diamondbacks",
-    "Atlanta Braves",
-    "Baltimore Orioles",
-    "Boston Red Sox",
-    "Chicago Cubs",
-    "Chicago White Sox",
-    "Cincinnati Reds",
-    "Cleveland Guardians",
-    "Colorado Rockies",
-    "Detroit Tigers",
-    "Houston Astros",
-    "Kansas City Royals",
-    "Los Angeles Angels",
-    "Los Angeles Dodgers",
-    "Miami Marlins",
-    "Milwaukee Brewers",
-    "Minnesota Twins",
-    "New York Mets",
-    "New York Yankees",
-    "Oakland Athletics",
-    "Philadelphia Phillies",
-    "Pittsburgh Pirates",
-    "San Diego Padres",
-    "San Francisco Giants",
-    "Seattle Mariners",
-    "St. Louis Cardinals",
-    "Tampa Bay Rays",
-    "Texas Rangers",
-    "Toronto Blue Jays",
-    "Washington Nationals",
-]
+mlb_teams_list = sorted([info["mlb_team"] for info in city_target_mapping.values()])
 
 selected_teams = []
 if search_mode == "By Artist":
@@ -351,14 +319,12 @@ team_city_mapping = {
     "Los Angeles Angels": "Los Angeles",
     "San Francisco Giants": "San Francisco",
     "Oakland Athletics": "San Francisco",
-    "San Francisco": "San Francisco",
     "Atlanta Braves": "Atlanta",
     "Boston Red Sox": "Boston",
     "Seattle Mariners": "Seattle",
     "Texas Rangers": "Dallas",
     "Houston Astros": "Houston",
     "St. Louis Cardinals": "St. Louis",
-    "San Diego Padres": "San Diego",
     "San Diego Padres": "San Diego",
     "Philadelphia Phillies": "Philadelphia",
     "Washington Nationals": "Washington",
@@ -375,9 +341,6 @@ team_city_mapping = {
     "Kansas City Royals": "Kansas City",
     "Milwaukee Brewers": "Milwaukee",
     "Pittsburgh Pirates": "Pittsburgh",
-    "Chicago": "Chicago",
-    "New York": "New York",
-    "Inglewood": "Los Angeles",
 }
 
 
@@ -460,30 +423,37 @@ def get_concerts_by_city(city_name):
 
 @st.cache_data
 def get_mlb_schedule(start_date, end_date):
-    mlb = Mlb()
-    try:
-        schedule = mlb.get_schedule(start_date=start_date, end_date=end_date)
-        games_data = []
-        for date_obj in schedule.dates:
-            game_date = date_obj.date
-            for game in date_obj.games:
-                if getattr(game, "game_type", "R") != "R":
+    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&startDate={start_date}&endDate={end_date}&hydrate=venue"
+    response = requests.get(url)
+    games_data = []
+    if response.status_code == 200:
+        data = response.json()
+        dates_list = data.get("dates", [])
+        for date_entry in dates_list:
+            game_date = date_entry.get("date")
+            for game in date_entry.get("games", []):
+                if game.get("gameType") != "R":
                     continue
-                venue_lat = getattr(game.venue, "latitude", 0.0)
-                venue_lon = getattr(game.venue, "longitude", 0.0)
+                teams = game.get("teams", {})
+                home_team = teams.get("home", {}).get("team", {}).get("name")
+                away_team = teams.get("away", {}).get("team", {}).get("name")
+                venue = game.get("venue", {})
+                stadium_name = venue.get("name", "Unknown Stadium")
+                coordinates = venue.get("location", {}).get("defaultCoordinates", {})
+                venue_lat = coordinates.get("latitude", 0.0)
+                venue_lon = coordinates.get("longitude", 0.0)
+
                 games_data.append(
                     {
                         "Game Date": game_date,
-                        "Home Team": game.teams.home.team.name,
-                        "Away Team": game.teams.away.team.name,
-                        "Stadium": game.venue.name,
+                        "Home Team": home_team,
+                        "Away Team": away_team,
+                        "Stadium": stadium_name,
                         "Lat": float(venue_lat) if venue_lat else 0.0,
                         "Lon": float(venue_lon) if venue_lon else 0.0,
                     }
                 )
-        return pd.DataFrame(games_data)
-    except Exception as e:
-        return pd.DataFrame()
+    return pd.DataFrame(games_data)
 
 
 # --- Main Execution ---
